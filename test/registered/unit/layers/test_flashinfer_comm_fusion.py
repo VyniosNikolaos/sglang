@@ -1,5 +1,7 @@
+import functools
 import types
 import unittest
+from enum import Enum
 from unittest.mock import patch
 
 import torch
@@ -19,6 +21,40 @@ class _FakeWorkspace:
         self.world_size = world_size
 
     def is_buffer_size_sufficient(self, **_kwargs):
+        return True
+
+
+class _FakeMNNVLStrategy(Enum):
+    ONESHOT = 0
+    TWOSHOT = 1
+    AUTO = 99
+
+
+class _FakeMNNVLWorkspace:
+    def __init__(self):
+        self.strategy = None
+
+    @functools.cache
+    def is_buffer_size_sufficient(
+        self,
+        tp_size,
+        num_tokens,
+        hidden_dim,
+        dtype,
+        strategy=_FakeMNNVLStrategy.AUTO,
+    ):
+        self.strategy = strategy
+        return True
+
+
+class _FakeTRTLLMWorkspace:
+    def __init__(self):
+        self.use_oneshot = None
+
+    def is_buffer_size_sufficient(
+        self, tp_size, num_tokens, hidden_dim, dtype, use_oneshot=None
+    ):
+        self.use_oneshot = use_oneshot
         return True
 
 
@@ -72,6 +108,92 @@ def _torch_allreduce_residual_rmsnorm_baseline(
 
 
 class TestFlashInferCommFusion(unittest.TestCase):
+    def test_workspace_initialization_configures_size_check(self):
+        manager = fusion.FlashInferWorkspaceManager()
+        workspace = _FakeMNNVLWorkspace()
+
+        with (
+            patch.object(fusion, "_flashinfer_comm", object()),
+            patch.object(
+                fusion,
+                "_create_allreduce_fusion_workspace",
+                return_value=workspace,
+            ),
+            patch.object(
+                fusion, "_preflight_check_workspace_memory", return_value=True
+            ),
+        ):
+            manager.initialize(
+                world_size=4,
+                rank=0,
+                max_token_num=8,
+                hidden_dim=16,
+                backend="mnnvl",
+                dtype=torch.bfloat16,
+                use_oneshot=True,
+            )
+
+        self.assertTrue(manager.initialized)
+        self.assertEqual(manager._workspace_size_check_kwarg, "strategy")
+        self.assertIs(manager._workspace_size_check_strategy_type, _FakeMNNVLStrategy)
+
+    def test_workspace_size_check_adapts_backend_strategy(self):
+        manager = fusion.FlashInferWorkspaceManager()
+        manager.initialized = True
+        manager.world_size = 4
+
+        manager.workspace = _FakeMNNVLWorkspace()
+        manager._configure_workspace_size_check()
+        with patch.object(
+            fusion.inspect,
+            "signature",
+            side_effect=AssertionError("signature must be cached"),
+        ):
+            self.assertTrue(
+                manager.is_buffer_size_sufficient(
+                    token_num=8,
+                    hidden_dim=16,
+                    dtype=torch.bfloat16,
+                    use_oneshot=True,
+                )
+            )
+            self.assertEqual(manager.workspace.strategy, _FakeMNNVLStrategy.ONESHOT)
+            self.assertTrue(
+                manager.is_buffer_size_sufficient(
+                    token_num=8,
+                    hidden_dim=16,
+                    dtype=torch.bfloat16,
+                    use_oneshot=False,
+                )
+            )
+            self.assertEqual(manager.workspace.strategy, _FakeMNNVLStrategy.TWOSHOT)
+            self.assertTrue(
+                manager.is_buffer_size_sufficient(
+                    token_num=8,
+                    hidden_dim=16,
+                    dtype=torch.bfloat16,
+                    use_oneshot=None,
+                )
+            )
+            self.assertEqual(manager.workspace.strategy, _FakeMNNVLStrategy.AUTO)
+
+        manager.workspace = _FakeTRTLLMWorkspace()
+        manager._configure_workspace_size_check()
+        with patch.object(
+            fusion.inspect,
+            "signature",
+            side_effect=AssertionError("signature must be cached"),
+        ):
+            self.assertTrue(
+                manager.is_buffer_size_sufficient(
+                    token_num=8,
+                    hidden_dim=16,
+                    dtype=torch.bfloat16,
+                    use_oneshot=True,
+                )
+            )
+        self.assertTrue(manager.workspace.use_oneshot)
+
     def test_auto_backend_resolves_by_arch(self):
         single_node = types.SimpleNamespace(
             flashinfer_allreduce_fusion_backend="auto", nnodes=1
