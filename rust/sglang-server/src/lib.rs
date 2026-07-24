@@ -9,9 +9,17 @@
 //!   * `push_result`   — Python scheduler thread pushes one control result.
 //!
 //! All are non-blocking, so the GIL is never held across a wait.
+#![allow(dead_code)] // TODO: remove when the consumer PR lands
 
 mod environ;
 mod error;
 mod fsm;
 mod ids;
 mod message;
+
+use pyo3::prelude::*;
+
+#[pymodule]
+fn _core(_m: &Bound<'_, PyModule>) -> PyResult<()> {
+    Ok(())
+}
