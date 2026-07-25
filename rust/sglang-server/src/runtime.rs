@@ -14,5 +14,3 @@
 #![allow(dead_code)] // TODO: remove when the consumer PR lands
 
 mod runnable;
-
-// Re-export so stages keep importing `crate::runtime::Runnable`.
