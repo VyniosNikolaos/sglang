@@ -17,7 +17,7 @@ mod config;
 mod runnable;
 mod threads;
 
-pub use config::RuntimeConfig;
+pub use config::{RuntimeConfig, ServerArgs};
 
 // Re-export so stages keep importing `crate::runtime::Runnable`.
 pub use runnable::Runnable;

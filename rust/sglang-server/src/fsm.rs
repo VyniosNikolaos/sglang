@@ -10,7 +10,6 @@
 //! Received, Validating, Normalizing, Encoding, Tokenizing, Queued,
 //! Streaming { chunks_sent }, Finalizing, Completed, Failed(Error), Aborted
 //! ```
-#![allow(dead_code)] // TODO: remove when the consumer PR lands
 
 use crate::error::Error;
 

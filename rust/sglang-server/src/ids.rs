@@ -1,5 +1,4 @@
 //! Lightweight identifiers used across pipeline stages.
-#![allow(dead_code)] // TODO: remove when the consumer PR lands
 
 use std::{
     collections::hash_map::DefaultHasher,
