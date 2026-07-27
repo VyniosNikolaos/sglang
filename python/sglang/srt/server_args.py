@@ -3643,7 +3643,17 @@ class ServerArgs:
         # whose values depend on later prompt tokens, so both are invalid.
         # Breakable CUDA Graph captures one complete prefill and is the graph
         # mode validated for this encoder-style attention.
-        if getattr(model_config, "is_embedding_gemma", False):
+        # ``_handle_model_capability_adjustments`` is also exercised directly
+        # by a few focused tests that use a small ModelConfig stand-in. Keep
+        # the old predicate as a compatibility fallback while production
+        # ModelConfig instances use the central capability contract.
+        embedding_model_spec = getattr(model_config, "embedding_model_spec", None)
+        is_embedding_gemma = (
+            embedding_model_spec.auto_enable_embedding
+            if embedding_model_spec is not None
+            else getattr(model_config, "is_embedding_gemma", False)
+        )
+        if is_embedding_gemma:
             self.disable_radix_cache = True
             self.chunked_prefill_size = -1
             self.cuda_graph_config.decode.backend = Backend.DISABLED
