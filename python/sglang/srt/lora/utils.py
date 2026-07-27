@@ -357,9 +357,11 @@ LORA_LINEAR_SHARD_SPECS: dict[str, Tuple[LoRAParallelism, LoRAShardGroup]] = {
     "out_proj": (LoRAParallelism.ROW, LoRAShardGroup.ATTN_TP),
     "wo_ud": (LoRAParallelism.ROW, LoRAShardGroup.ATTN_TP),
     # Linear-attention input projections: their layers switch to the attn-TP
-    # group under `--enable-dp-attention` (mamba.py, qwen3_5.py).
-    "in_proj": (LoRAParallelism.COLUMN, LoRAShardGroup.GLOBAL_TP),
-    "in_proj_qkvz": (LoRAParallelism.COLUMN, LoRAShardGroup.GLOBAL_TP),
+    # group under `--enable-dp-attention` (mamba.py sets tp_size/tp_rank from
+    # attn_tp when dp-attention is enabled; qwen3_5.py builds in_proj_qkvz
+    # with tp_rank=attn_tp_rank), so their LoRA buffers must too.
+    "in_proj": (LoRAParallelism.COLUMN, LoRAShardGroup.ATTN_TP),
+    "in_proj_qkvz": (LoRAParallelism.COLUMN, LoRAShardGroup.ATTN_TP),
     # Dense MLP: sharded on the outer TP group.
     "up_proj": (LoRAParallelism.COLUMN, LoRAShardGroup.GLOBAL_TP),
     "gate_up_proj": (LoRAParallelism.COLUMN, LoRAShardGroup.GLOBAL_TP),

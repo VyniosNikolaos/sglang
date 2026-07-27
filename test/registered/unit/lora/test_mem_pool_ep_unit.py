@@ -1090,6 +1090,9 @@ def _fake_base_model_with_hidden_dim(num_experts: int) -> torch.nn.Module:
                 return cfg.hidden_size, cfg.moe_intermediate_size * 2
             if module_name == "down_proj_moe":
                 return cfg.moe_intermediate_size, cfg.hidden_size
+            if module_name == "in_proj_qkvz":
+                # linear-attention qkvz input projection (column-parallel)
+                return cfg.hidden_size, 4 * cfg.hidden_size
             raise NotImplementedError(module_name)
 
     return _Model()
@@ -1276,6 +1279,20 @@ class TestAttnModulesShardByAttnTp(unittest.TestCase):
         model = _fake_base_model_with_hidden_dim(num_experts=1)
         self.assertEqual(pool.get_lora_A_shape("o_proj", model, 8, 0), (2, 8, 32))
         self.assertEqual(pool.get_lora_B_shape("qkv_proj", model, 8, 0), (2, 96, 8))
+
+    def test_linear_attention_in_proj_shards_by_attn_tp(self):
+        """Regression: in_proj_qkvz is built on the attn-TP group under
+        dp-attention (qwen3_5.py passes tp_rank=attn_tp_rank), but it was
+        classified as outer-TP, so with tp=4 / attn_tp=1 its LoRA B buffer
+        came out 4x narrower than the wrapper's attn_tp-local slice and
+        adapter load failed on the shape assert."""
+        pool = self._pool(tp_size=4, attn_tp_size=1)
+        model = _fake_base_model_with_hidden_dim(num_experts=1)
+        # column-parallel: B output_dim = 4*64 = 256, undivided under
+        # attn_tp=1 (pre-fix: divided by the outer tp=4 -> 64).
+        self.assertEqual(
+            pool.get_lora_B_shape("in_proj_qkvz", model, 8, 0), (2, 256, 8)
+        )
 
 
 class TestLoadBufferPassesMoeTpRankToSlice(unittest.TestCase):
