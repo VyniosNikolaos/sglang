@@ -26,14 +26,14 @@ from sglang.srt.lora.lora import LoRAAdapter
 from sglang.srt.lora.lora_config import LoRAConfig
 from sglang.srt.lora.lora_registry import LoRARef
 from sglang.srt.lora.utils import (
-    ATTENTION_LINEAR_LORA_NAMES,
     EMBEDDING_NAMES,
-    REPLICATED_LINEAR_LORA_NAMES,
-    ROW_PARALLELISM_LINEAR_LORA_NAMES,
+    LoRAParallelism,
+    LoRAShardGroup,
     LoRAType,
     copy_weight_into_buffer,
     get_hidden_dim,
     get_lm_head_lora_b_shard_size,
+    get_lora_shard_spec,
     get_normalized_target_modules,
     get_stacked_multiply,
     get_target_module_name,
@@ -110,17 +110,6 @@ def _get_moe_tp_context() -> Tuple[int, int]:
         return 1, 0
 
 
-def _get_attn_tp_size(tp_size: int) -> int:
-    """Return `attn_tp_size`, or the outer `tp_size` if the attention TP
-    group is not initialized. Under `--enable-dp-attention` attention weights
-    (e.g. MLA `o_proj`) are sharded along `attn_tp_size = tp_size // dp_size`
-    instead of the outer `tp_size`."""
-    try:
-        return get_parallel().attn_tp_size
-    except Exception:  # pragma: no cover - attention TP group not initialized
-        return tp_size
-
-
 def _moe_runner_keeps_global_expert_ids() -> bool:
     """True if a supported LoRA runner keeps global expert IDs."""
     try:
@@ -149,6 +138,7 @@ class LoRAMemoryPool:
         dtype: torch.dtype,
         tp_size: int,
         tp_rank: int,
+        attn_tp_size: int,
         max_lora_rank: int,
         target_modules: Set[str],
         base_model: torch.nn.Module,
@@ -201,7 +191,7 @@ class LoRAMemoryPool:
         # under `--enable-dp-attention` is `attn_tp_size = tp_size // dp_size`.
         # The corresponding LoRA wrappers slice weights by the base layer's
         # attn_tp-local rank, so the buffer shapes must match that shard.
-        self.attn_tp_size = _get_attn_tp_size(tp_size)
+        self.attn_tp_size: int = attn_tp_size
 
         # Initialize eviction policy
         self.eviction_policy = get_eviction_policy(eviction_policy)
@@ -278,11 +268,10 @@ class LoRAMemoryPool:
         `tp_size` at EP=1), attention projections by `attn_tp_size` (smaller
         than the outer `tp_size` under `--enable-dp-attention`), everything
         else by the outer `tp_size`."""
-        if self.is_moe_module(module_name):
-            if self.is_shared_moe_module(module_name):
-                return self.tp_size
+        _, shard_group = get_lora_shard_spec(module_name)
+        if shard_group is LoRAShardGroup.MOE_TP:
             return self.moe_tp_size
-        if module_name in ATTENTION_LINEAR_LORA_NAMES:
+        if shard_group is LoRAShardGroup.ATTN_TP:
             return self.attn_tp_size
         return self.tp_size
 
@@ -404,11 +393,8 @@ class LoRAMemoryPool:
         )
         c = get_stacked_multiply(module_name, base_model)
         effective_tp_size = self._effective_tp_size(module_name)
-        if (
-            effective_tp_size > 1
-            and module_name in ROW_PARALLELISM_LINEAR_LORA_NAMES
-            and module_name not in REPLICATED_LINEAR_LORA_NAMES
-        ):
+        parallelism, _ = get_lora_shard_spec(module_name)
+        if effective_tp_size > 1 and parallelism is LoRAParallelism.ROW:
             input_dim = divide(input_dim, effective_tp_size)
 
         if self.is_moe_module(module_name):
@@ -501,11 +487,8 @@ class LoRAMemoryPool:
             module_name, self.base_hf_config, base_model, layer_idx
         )
         effective_tp_size = self._effective_tp_size(module_name)
-        if (
-            effective_tp_size > 1
-            and module_name not in ROW_PARALLELISM_LINEAR_LORA_NAMES
-            and module_name not in REPLICATED_LINEAR_LORA_NAMES
-        ):
+        parallelism, _ = get_lora_shard_spec(module_name)
+        if effective_tp_size > 1 and parallelism is LoRAParallelism.COLUMN:
             output_dim = self._column_parallel_lora_b_per_rank_dim(
                 module_name, output_dim, effective_tp_size
             )

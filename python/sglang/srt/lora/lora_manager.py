@@ -45,6 +45,7 @@ from sglang.srt.lora.utils import (
     get_target_module_name,
 )
 from sglang.srt.managers.io_struct import LoRAUpdateOutput
+from sglang.srt.runtime_context import get_parallel
 from sglang.srt.model_executor.forward_batch_info import ForwardBatch
 from sglang.srt.server_args import ServerArgs
 from sglang.srt.utils import get_available_gpu_memory, replace_submodule
@@ -82,6 +83,9 @@ class LoRAManager:
         self.device: torch.device = next(self.base_model.parameters()).device
         self.tp_size: int = tp_size
         self.tp_rank: int = tp_rank
+        # Attention projections shard on the attn-TP group; extracted once
+        # here (parallel groups are frozen after init_torch_distributed).
+        self.attn_tp_size: int = get_parallel().attn_tp_size
         self.lora_added_tokens_size: Optional[int] = None
         self.enable_lora_overlap_loading: Optional[bool] = (
             server_args.enable_lora_overlap_loading
@@ -798,6 +802,7 @@ class LoRAManager:
             dtype=self.dtype,
             tp_size=self.tp_size,
             tp_rank=self.tp_rank,
+            attn_tp_size=self.attn_tp_size,
             max_lora_rank=self.max_lora_rank,
             target_modules=self.target_modules,
             base_model=self.base_model,

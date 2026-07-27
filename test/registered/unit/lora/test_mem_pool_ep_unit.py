@@ -994,6 +994,7 @@ class TestPoolInitPicksUpEpContext(unittest.TestCase):
                 dtype=torch.bfloat16,
                 tp_size=tp_size,
                 tp_rank=tp_rank,
+                attn_tp_size=tp_size,
                 max_lora_rank=8,
                 target_modules={"qkv_proj"},
                 base_model=base_model,
