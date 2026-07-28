@@ -389,6 +389,7 @@ def get_lora_shard_spec(module_name: str) -> Tuple[LoRAParallelism, LoRAShardGro
         module_name, (LoRAParallelism.COLUMN, LoRAShardGroup.GLOBAL_TP)
     )
 
+
 # Normalized module names that the LoRA system fully supports
 # (i.e. get_hidden_dim, init_buffers, and init_lora_modules can handle them).
 _KNOWN_LORA_TARGET_MODULES = frozenset(
