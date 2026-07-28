@@ -36,7 +36,7 @@ const PORTABLE_FLAGS: &[char] = &['i', 'm', 's', 'x', 'u', '-'];
 /// `.{100}`, both of which measure ~0.005 ms. The compounding families that used to
 /// justify a small cap — `(?:a*){65535}` and friends — are repeats of a
 /// VARIABLE-length body, which [`ambiguity_degree`] rejects outright.
-const MAX_REPEAT_COUNT: u64 = 4096;
+const MAX_REPEAT_COUNT: u64 = 512;
 
 /// Limit on [`ambiguity_degree`]. Chosen by measurement, not argument: see that
 /// function's docs for the 3730-pattern sweep that rules out 2 and 3.
